@@ -1,0 +1,25 @@
+{
+  "name": "poh-backend",
+  "version": "0.1.0",
+  "description": "Off-chain validation orchestrator and REST API for the hybrid Proof of Humanity system",
+  "type": "module",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "db:init": "node src/db/init.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "ethers": "^6.13.4",
+    "express": "^4.21.1",
+    "helmet": "^8.0.0",
+    "morgan": "^1.10.0",
+    "pg": "^8.13.1"
+  },
+  "license": "MIT"
+}
