@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { ethers } from 'ethers';
 import { validateBiometrics } from '../services/biometrics.js';
+import { findExistingHuman, registerHuman } from '../services/identity.js';
 import {
   deriveHumanityHash,
   registerProof,
@@ -41,22 +42,50 @@ humanityRouter.post('/validate', async (req, res) => {
     return res.status(422).json({ error: 'validation_failed', reason: bio.reason });
   }
 
-  // 2. Derive humanity hash.
+  // 2. Biometric uniqueness — enforce "one human, one proof" regardless of wallet.
+  //    A matching descriptor means this person is already registered, so we reject
+  //    BEFORE spending any gas. This is the system's off-chain Sybil resistance.
+  const { match, nearestDistance } = await findExistingHuman(faceDescriptor);
+  if (match) {
+    const sameWallet = match.address.toLowerCase() === address.toLowerCase();
+    await recordValidation({
+      address,
+      humanityHash: '',
+      verified: false,
+      livenessPassed: true,
+      faceDistance: nearestDistance,
+      validationMs,
+    });
+    return res.status(409).json({
+      error: sameWallet ? 'already_registered' : 'duplicate_human',
+      reason: sameWallet
+        ? 'This person is already registered with this wallet.'
+        : 'This person is already registered under a different wallet. One human can hold only one proof.',
+      faceDistance: nearestDistance,
+      ...(sameWallet ? {} : { boundAddress: match.address }),
+    });
+  }
+
+  // 3. Derive humanity hash.
   const humanityHash = deriveHumanityHash(address, faceDescriptor);
 
-  // 3. Register on-chain (if configured).
+  // 4. Register on-chain (if configured).
   if (!chainConfigured()) {
+    await registerHuman({ address, humanityHash, descriptor: faceDescriptor });
     return res.status(200).json({
       address,
       humanityHash,
       onChain: false,
       note: 'chain_not_configured — validation passed but proof not registered on-chain',
-      metrics: { validationMs },
+      metrics: { validationMs, faceDistance: nearestDistance },
     });
   }
 
   try {
     const { txHash, gasUsed, confirmationMs } = await registerProof(address, humanityHash);
+
+    // Commit the human to the registry only after the on-chain proof succeeds.
+    await registerHuman({ address, humanityHash, descriptor: faceDescriptor });
 
     await recordValidation({
       address,
@@ -64,7 +93,7 @@ humanityRouter.post('/validate', async (req, res) => {
       txHash,
       verified: true,
       livenessPassed: true,
-      faceDistance: bio.faceDistance,
+      faceDistance: nearestDistance,
       validationMs,
       confirmationMs,
       gasUsed,
@@ -75,7 +104,7 @@ humanityRouter.post('/validate', async (req, res) => {
       humanityHash,
       onChain: true,
       txHash,
-      metrics: { validationMs, confirmationMs, gasUsed },
+      metrics: { validationMs, confirmationMs, gasUsed, faceDistance: nearestDistance },
     });
   } catch (err) {
     const reason = err.reason ?? err.shortMessage ?? err.message;
@@ -108,6 +137,8 @@ humanityRouter.get('/metrics', async (_req, res) => {
     SELECT
       COUNT(*)                          AS total,
       COUNT(*) FILTER (WHERE verified)  AS verified,
+      COUNT(*) FILTER (WHERE NOT verified AND liveness_passed) AS rejected_duplicates,
+      (SELECT COUNT(*) FROM humans)     AS unique_humans,
       ROUND(AVG(validation_ms))         AS avg_validation_ms,
       ROUND(AVG(confirmation_ms))       AS avg_confirmation_ms,
       ROUND(AVG(gas_used))              AS avg_gas_used

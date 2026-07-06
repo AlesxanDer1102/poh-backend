@@ -35,4 +35,16 @@ CREATE TABLE IF NOT EXISTS validations (
   created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_validations_user ON validations (user_address);
+
+-- Biometric registry: the off-chain source of truth for human uniqueness.
+-- One row per registered human. Sybil resistance (one human, one proof —
+-- regardless of wallet) is enforced by comparing an incoming face descriptor
+-- against every stored descriptor by Euclidean distance.
+CREATE TABLE IF NOT EXISTS humans (
+  id            BIGSERIAL PRIMARY KEY,
+  user_address  TEXT        NOT NULL UNIQUE,
+  humanity_hash TEXT        NOT NULL,
+  descriptor    JSONB       NOT NULL,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
 `;
