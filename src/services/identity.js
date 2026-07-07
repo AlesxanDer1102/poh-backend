@@ -27,13 +27,15 @@ export function euclideanDistance(a, b) {
  * match threshold.
  *
  * @returns {Promise<{ match: { address: string, humanityHash: string, distance: number } | null,
- *                     nearestDistance: number | null }>}
+ *                     nearestDistance: number | null, registrySize: number }>}
  *          `match` is the closest human under the threshold (null if this face
  *          is new). `nearestDistance` is the minimum distance to any registered
  *          human (null when the registry is empty) — recorded as a metric.
+ *          `registrySize` is the number of descriptors scanned (the registry
+ *          size at scan time), used to plot matching time against N.
  */
 export async function findExistingHuman(descriptor) {
-  if (!dbReady()) return { match: null, nearestDistance: null };
+  if (!dbReady()) return { match: null, nearestDistance: null, registrySize: 0 };
 
   const { rows } = await pool.query('SELECT user_address, humanity_hash, descriptor FROM humans');
 
@@ -49,7 +51,7 @@ export async function findExistingHuman(descriptor) {
     }
   }
 
-  return { match, nearestDistance };
+  return { match, nearestDistance, registrySize: rows.length };
 }
 
 /** Persist a newly registered human's biometric template. */

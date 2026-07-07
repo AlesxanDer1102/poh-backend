@@ -30,11 +30,17 @@ CREATE TABLE IF NOT EXISTS validations (
   liveness_passed BOOLEAN     NOT NULL DEFAULT false,
   face_distance   NUMERIC,
   validation_ms   INTEGER,
+  matching_ms     INTEGER,
+  registry_size   INTEGER,
   confirmation_ms INTEGER,
   gas_used        BIGINT,
   created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_validations_user ON validations (user_address);
+
+-- Backfill columns on databases created before these metrics existed.
+ALTER TABLE validations ADD COLUMN IF NOT EXISTS matching_ms   INTEGER;
+ALTER TABLE validations ADD COLUMN IF NOT EXISTS registry_size INTEGER;
 
 -- Biometric registry: the off-chain source of truth for human uniqueness.
 -- One row per registered human. Sybil resistance (one human, one proof —

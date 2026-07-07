@@ -45,7 +45,12 @@ humanityRouter.post('/validate', async (req, res) => {
   // 2. Biometric uniqueness — enforce "one human, one proof" regardless of wallet.
   //    A matching descriptor means this person is already registered, so we reject
   //    BEFORE spending any gas. This is the system's off-chain Sybil resistance.
-  const { match, nearestDistance } = await findExistingHuman(faceDescriptor);
+  //    This is an O(N) descriptor scan and the real cost of off-chain validation,
+  //    so it is timed separately from the trivial trust-check above. `registrySize`
+  //    is the N scanned, letting Track 1 plot matching time against registry growth.
+  const tMatch = Date.now();
+  const { match, nearestDistance, registrySize } = await findExistingHuman(faceDescriptor);
+  const matchingMs = Date.now() - tMatch;
   if (match) {
     const sameWallet = match.address.toLowerCase() === address.toLowerCase();
     await recordValidation({
@@ -55,6 +60,8 @@ humanityRouter.post('/validate', async (req, res) => {
       livenessPassed: true,
       faceDistance: nearestDistance,
       validationMs,
+      matchingMs,
+      registrySize,
     });
     return res.status(409).json({
       error: sameWallet ? 'already_registered' : 'duplicate_human',
@@ -77,7 +84,7 @@ humanityRouter.post('/validate', async (req, res) => {
       humanityHash,
       onChain: false,
       note: 'chain_not_configured — validation passed but proof not registered on-chain',
-      metrics: { validationMs, faceDistance: nearestDistance },
+      metrics: { validationMs, matchingMs, registrySize, faceDistance: nearestDistance },
     });
   }
 
@@ -95,6 +102,8 @@ humanityRouter.post('/validate', async (req, res) => {
       livenessPassed: true,
       faceDistance: nearestDistance,
       validationMs,
+      matchingMs,
+      registrySize,
       confirmationMs,
       gasUsed,
     });
@@ -104,7 +113,7 @@ humanityRouter.post('/validate', async (req, res) => {
       humanityHash,
       onChain: true,
       txHash,
-      metrics: { validationMs, confirmationMs, gasUsed, faceDistance: nearestDistance },
+      metrics: { validationMs, matchingMs, registrySize, confirmationMs, gasUsed, faceDistance: nearestDistance },
     });
   } catch (err) {
     const reason = err.reason ?? err.shortMessage ?? err.message;
@@ -140,6 +149,7 @@ humanityRouter.get('/metrics', async (_req, res) => {
       COUNT(*) FILTER (WHERE NOT verified AND liveness_passed) AS rejected_duplicates,
       (SELECT COUNT(*) FROM humans)     AS unique_humans,
       ROUND(AVG(validation_ms))         AS avg_validation_ms,
+      ROUND(AVG(matching_ms))           AS avg_matching_ms,
       ROUND(AVG(confirmation_ms))       AS avg_confirmation_ms,
       ROUND(AVG(gas_used))              AS avg_gas_used
     FROM validations
@@ -152,8 +162,8 @@ async function recordValidation(v) {
   try {
     await pool.query(
       `INSERT INTO validations
-        (user_address, humanity_hash, tx_hash, verified, liveness_passed, face_distance, validation_ms, confirmation_ms, gas_used)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+        (user_address, humanity_hash, tx_hash, verified, liveness_passed, face_distance, validation_ms, matching_ms, registry_size, confirmation_ms, gas_used)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
       [
         v.address,
         v.humanityHash,
@@ -162,6 +172,8 @@ async function recordValidation(v) {
         v.livenessPassed,
         v.faceDistance ?? null,
         v.validationMs ?? null,
+        v.matchingMs ?? null,
+        v.registrySize ?? null,
         v.confirmationMs ?? null,
         v.gasUsed ?? null,
       ],

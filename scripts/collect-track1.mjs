@@ -79,6 +79,8 @@ for (let i = 0; i < N; i++) {
       status: r.status,
       ok: r.ok,
       validationMs: m.validationMs ?? '',
+      matchingMs: m.matchingMs ?? '',
+      registrySize: m.registrySize ?? '',
       confirmationMs: m.confirmationMs ?? '',
       gasUsed: m.gasUsed ?? '',
       faceDistance: m.faceDistance ?? '',
@@ -88,7 +90,7 @@ for (let i = 0; i < N; i++) {
     });
     console.log(
       `[${i + 1}/${N}]${coldStart ? ' (cold)' : ''} ${r.ok ? 'OK  ' : 'FAIL ' + r.status} ` +
-        `gas=${m.gasUsed ?? '-'} conf=${m.confirmationMs ?? '-'}ms val=${m.validationMs ?? '-'}ms ` +
+        `gas=${m.gasUsed ?? '-'} conf=${m.confirmationMs ?? '-'}ms match=${m.matchingMs ?? '-'}ms(N=${m.registrySize ?? '-'}) ` +
         (r.ok ? '' : `-> ${r.data.error ?? ''} ${r.data.reason ?? ''}`),
     );
   } catch (err) {
@@ -105,14 +107,14 @@ const csvPath = join(outDir, `track1-performance-${stamp}.csv`);
 
 const cols = [
   'index', 'coldStart', 'address', 'status', 'ok',
-  'validationMs', 'confirmationMs', 'gasUsed', 'faceDistance', 'clientMs', 'txHash', 'error',
+  'validationMs', 'matchingMs', 'registrySize', 'confirmationMs', 'gasUsed', 'faceDistance', 'clientMs', 'txHash', 'error',
 ];
 const csv = [cols.join(','), ...rows.map((r) => cols.map((c) => JSON.stringify(r[c] ?? '')).join(','))].join('\n');
 writeFileSync(csvPath, csv);
 
 const warm = rows.filter((r) => r.ok && !r.coldStart);
 console.log(`\n=== Aggregates (n=${warm.length}, excluding cold start & failures) ===`);
-for (const key of ['validationMs', 'confirmationMs', 'gasUsed']) {
+for (const key of ['validationMs', 'matchingMs', 'confirmationMs', 'gasUsed']) {
   const s = stats(warm.map((r) => Number(r[key])));
   if (s) {
     console.log(
@@ -123,8 +125,13 @@ for (const key of ['validationMs', 'confirmationMs', 'gasUsed']) {
 }
 const cold = rows.find((r) => r.coldStart && r.ok);
 if (cold) {
-  console.log(`cold start     val=${cold.validationMs}ms  conf=${cold.confirmationMs}ms  gas=${cold.gasUsed}`);
+  console.log(`cold start     val=${cold.validationMs}ms  match=${cold.matchingMs}ms  conf=${cold.confirmationMs}ms  gas=${cold.gasUsed}`);
 }
+console.log(
+  '\nScalability: matchingMs is the O(N) uniqueness scan — plot it against registrySize\n' +
+    '(the registry grows +1 per run), do NOT read it as a flat average. gasUsed is expected\n' +
+    'to be constant (deterministic first-time write): report it as a fixed cost, not mean±sd.',
+);
 const failed = rows.filter((r) => !r.ok).length;
 console.log(`\nSuccess: ${rows.length - failed}/${rows.length}  |  CSV: ${csvPath}`);
 if (failed) console.log('Some runs failed — check the "error" column (e.g. validator wallet out of Sepolia ETH).');
